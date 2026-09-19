@@ -1,16 +1,3 @@
-import sys
-import subprocess
-
-print("Kütüphaneler kontrol ediliyor...")
-
-for package in ["pyTelegramBotAPI", "requests"]:
-    try:
-        __import__(package if package != "pyTelegramBotAPI" else "telebot")
-    except ImportError:
-        print(f"{package} yükleniyor...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-
-print("Modüller yükleniyor...")
 import telebot
 import sqlite3
 import random
@@ -21,6 +8,7 @@ import requests
 BOT_TOKEN = "8860966276:AAFkwmNEIuHYgvcioBpvEQj-WeGM4aBVnJk"
 ADMIN_ID = 8520025523
 
+print("Bot başlatılıyor...")
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode="Markdown")
 GITHUB_STOCK_URL = "https://raw.githubusercontent.com/osmancan666283-create/cpm-bot/main/stok.txt"
 
@@ -402,7 +390,7 @@ def handle_menu_clicks(message):
         try:
             invite_link = f"https://t.me/{bot.get_me().username}?start={chat_id}"
         except Exception:
-            invite_link = f"https://t.me/BotHazirlikBot?start={chat_id}"
+            invite_link = f"https://t.me/Cpm1_hesapSatis_bot?start={chat_id}"
         bot.send_message(chat_id, f"👥 Davet Linkin:\n`{invite_link}`", reply_markup=get_main_keyboard())
 
     elif text == "👤 Profilim":
@@ -447,4 +435,8 @@ def process_successful_payment(message):
     elif payload == "buy_surprise_promo":
         selected_reward = random.randint(1500, 8000)
         generated_code = generate_random_code()
-     
+        cursor.execute("INSERT INTO dynamic_promo_codes (code, reward_type, reward_value, is_used) VALUES (?, ?, ?, 0)", (generated_code, "volt", selected_reward))
+        conn.commit()
+        bot.send_message(chat_id, f"🎉 Sürpriz Kodun: {generated_code} ({selected_reward} Volt)", reply_markup=get_main_keyboard())
+    elif payload == "buy_vip_acc_star":
+    
