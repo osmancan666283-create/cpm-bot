@@ -34,7 +34,7 @@ def db_init():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
-        cw_rk_balance INTEGER DEFAULT 0,
+        cw_rk_balance INTEGER DEFAULT 1,
         is_vip BOOLEAN DEFAULT 0,
         vip_expire_time INTEGER DEFAULT 0,
         daily_spins_used INTEGER DEFAULT 0,
@@ -58,9 +58,9 @@ MAINTENANCE_MODE = False
 def get_main_keyboard():
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(
-        telebot.types.KeyboardButton("🛒 VIP Hesap Mağazası"),
+        telebot.types.KeyboardButton("🛒 VIP Hesap Mağazası (2 Volt)"),
         telebot.types.KeyboardButton("⚡ Volt Coin Al"),
-        telebot.types.KeyboardButton("🎁 Günlük Bonus (+20 Volt)"),
+        telebot.types.KeyboardButton("🎁 Günlük Bonus (+1 Volt)"),
         telebot.types.KeyboardButton("🎯 Görev Yap & Kazan"),
         telebot.types.KeyboardButton("👑 VIP Üyelik Al"),
         telebot.types.KeyboardButton("🎡 Şans Çarkı"),
@@ -86,7 +86,7 @@ def send_welcome(message):
     cursor = conn.cursor()
     cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (chat_id,))
     if not cursor.fetchone():
-        cursor.execute("INSERT INTO users (user_id) VALUES (?)", (chat_id,))
+        cursor.execute("INSERT INTO users (user_id, cw_rk_balance) VALUES (?, 1)", (chat_id,))
         conn.commit()
     conn.close()
 
@@ -111,10 +111,10 @@ def admin_add_balance(message):
     target_id, amount = int(args[1]), int(args[2])
     conn = sqlite3.connect("cpm_bot.db", check_same_thread=False)
     cursor = conn.cursor()
-    cursor.execute("UPDATE users SET cw_rk_balance = cw_rk_balance + ? WHERE user_id = ?", (amount, target_id))
+    cursor.execute("UPDATE users SET cw_rk_balance = MIN(5430, cw_rk_balance + ?) WHERE user_id = ?", (amount, target_id))
     conn.commit()
     conn.close()
-    bot.send_message(message.chat.id, f"✅ {target_id} ID'li kullanıcıya +{amount} Volt eklendi.")
+    bot.send_message(message.chat.id, f"✅ {target_id} ID'li kullanıcıya +{amount} Volt eklendi (Maks: 5430).")
 
 # --- 6. TÜM MENÜ VE BUTON YÖNETİMİ ---
 @bot.message_handler(func=lambda message: True)
@@ -134,9 +134,9 @@ def handle_all_messages(message):
     today_str = datetime.date.today().isoformat()
 
     if not row:
-        cursor.execute("INSERT INTO users (user_id, last_spin_date) VALUES (?, ?)", (chat_id, today_str))
+        cursor.execute("INSERT INTO users (user_id, cw_rk_balance, last_spin_date) VALUES (?, 1, ?)", (chat_id, today_str))
         conn.commit()
-        cwrk, is_vip, spins_used, tickets, last_spin, task_count = 0, 0, 0, 0, today_str, 0
+        cwrk, is_vip, spins_used, tickets, last_spin, task_count = 1, 0, 0, 0, today_str, 0
     else:
         cwrk, is_vip, spins_used, tickets, last_spin, task_count = row
         if last_spin != today_str:
@@ -229,7 +229,7 @@ def handle_all_messages(message):
 
     elif text == "👤 Profilim":
         vip_status_text = "Aktif (5 Hak/Gün)" if is_vip else "Normal Üye (2 Hak/Gün)"
-        bot.send_message(chat_id, f"👤 **Profil Bilgilerin NEYOM:**\n\n🆔 ID: `{chat_id}`\n⚡ Volt Bakiye: **{cwrk} Volt**\n👑 VIP Durumu: **{vip_status_text}**\n🎫 Bilet Hakları: {tickets}", reply_markup=get_main_keyboard())
+        bot.send_message(chat_id, f"👤 **Profil Bilgilerin NEYOM:**\n\n🆔 ID: `{chat_id}`\n⚡ Volt Bakiye: **{cwrk} / 5430 Volt**\n👑 VIP Durumu: **{vip_status_text}**\n🎫 Bilet Hakları: {tickets}", reply_markup=get_main_keyboard())
         conn.close()
         return
 
@@ -243,24 +243,36 @@ def handle_all_messages(message):
             conn.close()
             return
 
-        reward = random.choice([10, 25, 50, 100, 200])
+        # Sadece 1 veya 5 volt çıkacak şekilde ayarlandı (Maksimum 5430 sınırı gözetilerek)
+        reward = random.choice([1, 5])
+        new_balance = min(5430, cwrk + reward)
         new_spins_used = spins_used + 1
-        cursor.execute("UPDATE users SET cw_rk_balance = cw_rk_balance + ?, daily_spins_used = ?, last_spin_date = ? WHERE user_id = ?", (reward, new_spins_used, today_str, chat_id))
+        
+        cursor.execute("UPDATE users SET cw_rk_balance = ?, daily_spins_used = ?, last_spin_date = ? WHERE user_id = ?", (new_balance, new_spins_used, today_str, chat_id))
         conn.commit()
         
-        bot.send_message(chat_id, f"🎡 Çark çevrildi NEYOM!\n🎁 Kazandığın Ödül: **+{reward} Volt Coin**\n📊 Kalan Hak: **{max_limit - new_spins_used}/{max_limit}**", reply_markup=get_main_keyboard())
+        bot.send_message(chat_id, f"🎡 Çark çevrildi NEYOM!\n🎁 Kazandığın Ödül: **+{reward} Volt Coin**\n⚡ Güncel Bakiyen: **{new_balance} Volt**\n📊 Kalan Hak: **{max_limit - new_spins_used}/{max_limit}**", reply_markup=get_main_keyboard())
         conn.close()
         return
 
-    elif text == "🎁 Günlük Bonus (+20 Volt)":
-        cursor.execute("UPDATE users SET cw_rk_balance = cw_rk_balance + 20 WHERE user_id = ?", (chat_id,))
+    elif text == "🎁 Günlük Bonus (+1 Volt)":
+        new_balance = min(5430, cwrk + 1)
+        cursor.execute("UPDATE users SET cw_rk_balance = ? WHERE user_id = ?", (new_balance, chat_id))
         conn.commit()
-        bot.send_message(chat_id, "🎁 Günlük bonusun eklendi: **+20 Volt!**", reply_markup=get_main_keyboard())
+        bot.send_message(chat_id, f"🎁 Günlük bonusun eklendi: **+1 Volt!**\n⚡ Güncel Bakiyen: **{new_balance} Volt**", reply_markup=get_main_keyboard())
         conn.close()
         return
 
-    elif text == "🛒 VIP Hesap Mağazası":
-        bot.send_message(chat_id, "🛒 **VIP Hesap Mağazası:** Stoklar güncelleniyor NEYOM, yakında aktif olacak.", reply_markup=get_main_keyboard())
+    elif text == "🛒 VIP Hesap Mağazası (2 Volt)":
+        if cwrk < 2:
+            bot.send_message(chat_id, f"❌ Yetersiz bakiye NEYOM! Hesap almak için **2 Volt** gerekiyor. Mevcut bakiyen: **{cwrk} Volt**", reply_markup=get_main_keyboard())
+            conn.close()
+            return
+            
+        new_balance = cwrk - 2
+        cursor.execute("UPDATE users SET cw_rk_balance = ? WHERE user_id = ?", (new_balance, chat_id))
+        conn.commit()
+        bot.send_message(chat_id, f"🛒 VIP Hesap başarıyla satın alındı NEYOM!\n💰 Ücret: **2 Volt**\n⚡ Kalan Bakiye: **{new_balance} Volt**\n\n📌 Hesap bilgileri birazdan iletilecektir.", reply_markup=get_main_keyboard())
         conn.close()
         return
 
@@ -311,4 +323,4 @@ if __name__ == "__main__":
     
     print("Bot ve Web Sunucusu Başlatıldı...")
     bot.infinity_polling()
-                       
+    
