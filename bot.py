@@ -33,7 +33,19 @@ def generate_random_code():
 def db_init():
     conn = sqlite3.connect("cpm_bot.db")
     cursor = conn.cursor()
-    cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, cw_rk_balance REAL DEFAULT 0, is_vip BOOLEAN DEFAULT 0, vip_expire_time INTEGER DEFAULT 0, daily_spins INTEGER DEFAULT 1, ticket_rights INTEGER DEFAULT 0, referred_by INTEGER, last_spin_day TEXT DEFAULT '', last_daily_bonus TEXT DEFAULT '', task_count INTEGER DEFAULT 0)")
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY,
+        cw_rk_balance REAL DEFAULT 0,
+        is_vip BOOLEAN DEFAULT 0,
+        vip_expire_time INTEGER DEFAULT 0,
+        daily_spins INTEGER DEFAULT 1,
+        ticket_rights INTEGER DEFAULT 0,
+        referred_by INTEGER,
+        last_spin_day TEXT DEFAULT '',
+        last_daily_bonus TEXT DEFAULT '',
+        task_count INTEGER DEFAULT 0
+    )""")
     
     migrations = [
         "ALTER TABLE users ADD COLUMN vip_expire_time INTEGER DEFAULT 0",
@@ -50,7 +62,13 @@ def db_init():
         except sqlite3.OperationalError:
             pass
 
-    cursor.execute("CREATE TABLE IF NOT EXISTS dynamic_promo_codes (code TEXT PRIMARY KEY, reward_type TEXT, reward_value REAL DEFAULT 0, is_used INTEGER DEFAULT 0)")
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS dynamic_promo_codes (
+        code TEXT PRIMARY KEY,
+        reward_type TEXT,
+        reward_value REAL DEFAULT 0,
+        is_used INTEGER DEFAULT 0
+    )""")
     
     try:
         cursor.execute("ALTER TABLE dynamic_promo_codes ADD COLUMN is_used INTEGER DEFAULT 0")
@@ -90,8 +108,8 @@ def get_account_from_github_stock():
             lines = [line.strip() for line in response.text.splitlines() if line.strip()]
             if lines:
                 return random.choice(lines)
-    except Exception:
-        pass
+    except Exception as e:
+        print("Stok Hatası:", e)
     return None
 
 def get_main_keyboard():
@@ -113,7 +131,10 @@ def get_main_keyboard():
 
 def send_star_invoice(chat_id, title, description, payload, amount_in_stars):
     prices = [telebot.types.LabeledPrice(label=title, amount=amount_in_stars)]
-    bot.send_invoice(chat_id=chat_id, title=title, description=description, invoice_payload=payload, provider_token="", currency="XTR", prices=prices, start_parameter="buy_stars")
+    bot.send_invoice(
+        chat_id=chat_id, title=title, description=description,
+        invoice_payload=payload, provider_token="", currency="XTR", prices=prices, start_parameter="buy_stars"
+    )
 
 @bot.message_handler(commands=['bakim'])
 def toggle_maintenance(message):
@@ -121,7 +142,7 @@ def toggle_maintenance(message):
     if message.from_user.id != ADMIN_ID:
         return
     MAINTENANCE_MODE = not MAINTENANCE_MODE
-    bot.send_message(message.chat.id, "⚙️ Bakım Durumu: " + ("ACILDI" if MAINTENANCE_MODE else "KAPATILDI"))
+    bot.send_message(message.chat.id, "⚙️ Bakım Durumu: " + ("AÇILDI" if MAINTENANCE_MODE else "KAPATILDI"))
 
 @bot.message_handler(commands=['vipver'])
 def admin_give_vip(message):
@@ -129,7 +150,7 @@ def admin_give_vip(message):
         return
     args = message.text.split()
     if len(args) < 2 or not args[1].isdigit():
-        bot.send_message(message.chat.id, "Kullanim: /vipver <user_id> [gun_sayisi]")
+        bot.send_message(message.chat.id, "Kullanım: /vipver <user_id> [gün_sayısı]")
         return
     
     target_id = int(args[1])
@@ -141,11 +162,7 @@ def admin_give_vip(message):
     row = cursor.fetchone()
     
     current_time = int(time.time())
-    if row and row[0] == 1 and row[1] > current_time:
-        base_time = row[1]
-    else:
-        base_time = current_time
-
+    base_time = row[1] if row and row[0] == 1 and row[1] > current_time else current_time
     expire_timestamp = base_time + (days * 24 * 3600)
 
     if not row:
@@ -163,13 +180,13 @@ def admin_add_balance(message):
         return
     args = message.text.split()
     if len(args) != 3:
-        bot.send_message(message.chat.id, "Kullanim: /ekle <user_id> <miktar>")
+        bot.send_message(message.chat.id, "Kullanım: /ekle <user_id> <miktar>")
         return
     try:
         target_id = int(args[1])
         amount = float(args[2])
     except Exception:
-        bot.send_message(message.chat.id, "Kullanim: /ekle <user_id> <miktar>")
+        bot.send_message(message.chat.id, "Kullanım: /ekle <user_id> <miktar>")
         return
 
     conn = sqlite3.connect("cpm_bot.db")
@@ -244,10 +261,10 @@ def handle_menu_clicks(message):
             telebot.types.KeyboardButton("🔍 Kanal Kontrol Et"),
             telebot.types.KeyboardButton("⬅️ Ana Menü")
         )
-        bot.send_message(chat_id, "🎯 Görev Merkezi\n\n📊 İlerleme: " + str(task_count) + " / 15", reply_markup=task_markup)
+        bot.send_message(chat_id, f"🎯 Görev Merkezi\n\n📊 İlerleme: {task_count} / 15", reply_markup=task_markup)
 
     elif text == "🔍 Kanal Kontrol Et":
-        bot.send_message(chat_id, "📊 Toplam Paylaşım: " + str(task_count) + " / 15", reply_markup=get_main_keyboard())
+        bot.send_message(chat_id, f"📊 Toplam Paylaşım: {task_count} / 15", reply_markup=get_main_keyboard())
 
     elif text == "📢 Kanal Paylaşım Görevi Ekle":
         if task_count >= 15:
@@ -263,11 +280,11 @@ def handle_menu_clicks(message):
             won_reward = round(random.uniform(1.0, 5.0), 2)
             cursor.execute("UPDATE users SET cw_rk_balance = cw_rk_balance + ?, task_count = 15 WHERE user_id = ?", (won_reward, chat_id))
             conn.commit()
-            bot.send_message(chat_id, "🎉 15 Görev Tamamlandı! +" + str(won_reward) + " Volt Eklendi!", reply_markup=get_main_keyboard())
+            bot.send_message(chat_id, f"🎉 15 Görev Tamamlandı! +{won_reward} Volt Eklendi!", reply_markup=get_main_keyboard())
         else:
             cursor.execute("UPDATE users SET task_count = ? WHERE user_id = ?", (task_count, chat_id))
             conn.commit()
-            bot.send_message(chat_id, "✅ Kaydedildi! İlerleme: " + str(task_count) + " / 15", reply_markup=get_main_keyboard())
+            bot.send_message(chat_id, f"✅ Kaydedildi! İlerleme: {task_count} / 15", reply_markup=get_main_keyboard())
 
     elif text == "⚡ Volt Coin Al":
         bot.send_message(chat_id, "⚡ Volt Paketleri Seçin:", reply_markup=telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2).add(
@@ -280,15 +297,15 @@ def handle_menu_clicks(message):
         ))
 
     elif text == "⚡ 1 Volt (50 ⭐)":
-        send_star_invoice(chat_id, "1 Volt", "Yukleme", "buy_volt_1", 50)
+        send_star_invoice(chat_id, "1 Volt", "Yükleme", "buy_volt_1", 50)
     elif text == "⚡ 500 Volt (350 ⭐)":
-        send_star_invoice(chat_id, "500 Volt", "Yukleme", "buy_volt_500", 350)
+        send_star_invoice(chat_id, "500 Volt", "Yükleme", "buy_volt_500", 350)
     elif text == "⚡ 1500 Volt (950 ⭐)":
-        send_star_invoice(chat_id, "1500 Volt", "Yukleme", "buy_volt_1500", 950)
+        send_star_invoice(chat_id, "1500 Volt", "Yükleme", "buy_volt_1500", 950)
     elif text == "⚡ 3000 Volt (1800 ⭐)":
-        send_star_invoice(chat_id, "3000 Volt", "Yukleme", "buy_volt_3000", 1800)
+        send_star_invoice(chat_id, "3000 Volt", "Yükleme", "buy_volt_3000", 1800)
     elif text == "⚡ 5800 Volt (3500 ⭐)":
-        send_star_invoice(chat_id, "5800 Volt", "Yukleme", "buy_volt_5800", 3500)
+        send_star_invoice(chat_id, "5800 Volt", "Yükleme", "buy_volt_5800", 3500)
 
     elif text == "👑 VIP Üyelik Al":
         bot.send_message(chat_id, "👑 Süre Seçin:", reply_markup=telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2).add(
@@ -299,11 +316,11 @@ def handle_menu_clicks(message):
         ))
 
     elif text == "👑 7 Günlük VIP (150 ⭐)":
-        send_star_invoice(chat_id, "7 Gunluk VIP", "VIP", "buy_vip_7d", 150)
+        send_star_invoice(chat_id, "7 Günlük VIP", "VIP", "buy_vip_7d", 150)
     elif text == "👑 1 Aylık VIP (500 ⭐)":
-        send_star_invoice(chat_id, "1 Aylik VIP", "VIP", "buy_vip_1m", 500)
+        send_star_invoice(chat_id, "1 Aylık VIP", "VIP", "buy_vip_1m", 500)
     elif text == "👑 3 Aylık VIP (1,300 ⭐)":
-        send_star_invoice(chat_id, "3 Aylik VIP", "VIP", "buy_vip_3m", 1300)
+        send_star_invoice(chat_id, "3 Aylık VIP", "VIP", "buy_vip_3m", 1300)
 
     elif text == "🛒 VIP Hesap Mağazası":
         bot.send_message(chat_id, "🛒 Mağaza:", reply_markup=telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1).add(
@@ -321,13 +338,13 @@ def handle_menu_clicks(message):
             if account:
                 cursor.execute("UPDATE users SET cw_rk_balance = cw_rk_balance - 3 WHERE user_id = ?", (chat_id,))
                 conn.commit()
-                bot.send_message(chat_id, "🎉 Hesap:\n`" + account + "`", reply_markup=get_main_keyboard())
+                bot.send_message(chat_id, f"🎉 Hesap:\n`{account}`", reply_markup=get_main_keyboard())
             else:
                 cursor.execute("UPDATE users SET cw_rk_balance = (cw_rk_balance - 3) + 2810 WHERE user_id = ?", (chat_id,))
                 conn.commit()
-                bot.send_message(chat_id, "⚠️ Stokta hesap kalmadi, hesabina 2810 Volt eklendi!", reply_markup=get_main_keyboard())
+                bot.send_message(chat_id, "⚠️ Stokta hesap kalmadı, hesabına 2810 Volt eklendi!", reply_markup=get_main_keyboard())
         else:
-            bot.send_message(chat_id, "❌ Yetersiz bakiye! Mevcut: " + str(cwrk) + " Volt", reply_markup=get_main_keyboard())
+            bot.send_message(chat_id, f"❌ Yetersiz bakiye! Mevcut: {cwrk} Volt", reply_markup=get_main_keyboard())
 
     elif text == "🎁 Günlük Bonus (+20 Volt)":
         if last_bonus == today:
@@ -346,18 +363,14 @@ def handle_menu_clicks(message):
         if spins <= 0:
             bot.send_message(chat_id, "❌ Günlük çevirme hakkın bitti!", reply_markup=get_main_keyboard())
         else:
-            if is_user_vip:
-                won = round(random.uniform(1.0, 7.0), 2)
-            else:
-                won = round(random.uniform(1.0, 1.5), 2)
-
+            won = round(random.uniform(1.0, 7.0), 2) if is_user_vip else round(random.uniform(1.0, 1.5), 2)
             new_spins = spins - 1
             cursor.execute("UPDATE users SET cw_rk_balance = cw_rk_balance + ?, daily_spins = ? WHERE user_id = ?", (won, new_spins, chat_id))
             conn.commit()
-            bot.send_message(chat_id, "🎡 Çark döndü...\n\n🎉 " + str(won) + " Volt Kazandın!\nKalan hak: " + str(new_spins), reply_markup=get_main_keyboard())
+            bot.send_message(chat_id, f"🎡 Çark döndü...\n\n🎉 {won} Volt Kazandın!\nKalan hak: {new_spins}", reply_markup=get_main_keyboard())
 
     elif text == "🎟️ Sürpriz Promo Kod Al (8 Yıldız)":
-        send_star_invoice(chat_id, "Surpriz Kod", "Kod", "buy_surprise_promo", 8)
+        send_star_invoice(chat_id, "Sürpriz Kod", "Kod", "buy_surprise_promo", 8)
 
     elif text == "🎟️ Promo Kod Kullan":
         user_states[chat_id] = "waiting_promo"
@@ -376,29 +389,29 @@ def handle_menu_clicks(message):
                 cursor.execute("UPDATE dynamic_promo_codes SET is_used = 1 WHERE code = ?", (input_code,))
                 cursor.execute("UPDATE users SET cw_rk_balance = cw_rk_balance + ? WHERE user_id = ?", (reward_val, chat_id))
                 conn.commit()
-                bot.send_message(chat_id, "🎉 Tebrikler! Kod geçerliydi.\n⚡ Hesabınıza **+" + str(reward_val) + " Volt** eklendi!", reply_markup=get_main_keyboard())
+                bot.send_message(chat_id, f"🎉 Tebrikler! Kod geçerliydi.\n⚡ Hesabınıza **+{reward_val} Volt** eklendi!", reply_markup=get_main_keyboard())
             else:
                 bot.send_message(chat_id, "❌ Bu promosyon kodu daha önce başkası tarafından kullanılmış!", reply_markup=get_main_keyboard())
         else:
             bot.send_message(chat_id, "❌ Geçersiz veya hatalı kod!", reply_markup=get_main_keyboard())
 
     elif text == "🎫 Biletlerim & Kullan":
-        bot.send_message(chat_id, "🎫 Bilet Hakkın: " + str(tickets), reply_markup=get_main_keyboard())
+        bot.send_message(chat_id, f"🎫 Bilet Hakkın: {tickets}", reply_markup=get_main_keyboard())
 
     elif text == "👥 Arkadaşını Davet Et":
         try:
-            invite_link = "https://t.me/" + bot.get_me().username + "?start=" + str(chat_id)
+            invite_link = f"https://t.me/{bot.get_me().username}?start={chat_id}"
         except Exception:
-            invite_link = "https://t.me/BotHazirlikBot?start=" + str(chat_id)
-        bot.send_message(chat_id, "👥 Davet Linkin:\n`" + invite_link + "`", reply_markup=get_main_keyboard())
+            invite_link = f"https://t.me/BotHazirlikBot?start={chat_id}"
+        bot.send_message(chat_id, f"👥 Davet Linkin:\n`{invite_link}`", reply_markup=get_main_keyboard())
 
     elif text == "👤 Profilim":
         if is_user_vip:
             remaining_days = get_remaining_vip_days(vip_expire)
-            vip_text = "👑 VIP Üye (Kalan: " + str(remaining_days) + " gün)"
+            vip_text = f"👑 VIP Üye (Kalan: {remaining_days} gün)"
         else:
             vip_text = "👤 Normal Üye"
-        bot.send_message(chat_id, "👤 Profil\n🆔 ID: `" + str(chat_id) + "`\n⚡ Bakiye: " + str(cwrk) + " Volt\nDurum: " + vip_text, reply_markup=get_main_keyboard())
+        bot.send_message(chat_id, f"👤 Profil\n🆔 ID: `{chat_id}`\n⚡ Bakiye: {cwrk} Volt\nDurum: {vip_text}", reply_markup=get_main_keyboard())
 
     else:
         bot.send_message(chat_id, "Geçerli bir seçim yapın.", reply_markup=get_main_keyboard())
@@ -420,7 +433,7 @@ def process_successful_payment(message):
         amounts = {"buy_volt_1": 1, "buy_volt_500": 500, "buy_volt_1500": 1500, "buy_volt_3000": 3000, "buy_volt_5800": 5800}
         amt = amounts.get(payload, 0)
         cursor.execute("UPDATE users SET cw_rk_balance = cw_rk_balance + ? WHERE user_id = ?", (amt, chat_id))
-        bot.send_message(chat_id, "🎉 +" + str(amt) + " Volt Yüklendi!", reply_markup=get_main_keyboard())
+        bot.send_message(chat_id, f"🎉 +{amt} Volt Yüklendi!", reply_markup=get_main_keyboard())
     elif payload.startswith("buy_vip_"):
         days = 7 if payload == "buy_vip_7d" else (90 if payload == "buy_vip_3m" else 30)
         cursor.execute("SELECT vip_expire_time FROM users WHERE user_id = ?", (chat_id,))
@@ -430,6 +443,8 @@ def process_successful_payment(message):
         expire_timestamp = base_time + (days * 24 * 3600)
         
         cursor.execute("UPDATE users SET is_vip = 1, vip_expire_time = ?, daily_spins = 3 WHERE user_id = ?", (expire_timestamp, chat_id))
-        bot.send_message(chat_id, "🎉 " + str(days) + " Günlük VIP Üyeliğin Tanımlandı!", reply_markup=get_main_keyboard())
+        bot.send_message(chat_id, f"🎉 {days} Günlük VIP Üyeliğin Tanımlandı!", reply_markup=get_main_keyboard())
     elif payload == "buy_surprise_promo":
-        selected_reward = random.randint(1500, 8
+        selected_reward = random.randint(1500, 8000)
+        generated_code = generate_random_code()
+     
