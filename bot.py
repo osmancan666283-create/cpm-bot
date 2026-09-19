@@ -338,4 +338,4 @@ if __name__ == "__main__":
     db_init()
     print("Bot Çalışıyor ve Kesintisiz Dinlemede...")
     bot.infinity_polling(none_stop=True)
-    
+        
