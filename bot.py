@@ -1,3 +1,16 @@
+import sys
+import subprocess
+
+print("Kütüphaneler kontrol ediliyor...")
+
+for package in ["pyTelegramBotAPI", "requests"]:
+    try:
+        __import__(package if package != "pyTelegramBotAPI" else "telebot")
+    except ImportError:
+        print(f"{package} yükleniyor...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+
+print("Modüller yükleniyor...")
 import telebot
 import sqlite3
 import random
@@ -5,7 +18,7 @@ import time
 import string
 import requests
 
-BOT_TOKEN = "8860966276:AAGoD1jxA8vY-nTBttAuWgQOkUvMFWtQVsg"
+BOT_TOKEN = "8860966276:AAFkwmNEIuHYgvcioBpvEQj-WeGM4aBVnJk"
 ADMIN_ID = 8520025523
 
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode="Markdown")
@@ -419,9 +432,4 @@ def process_successful_payment(message):
         cursor.execute("UPDATE users SET is_vip = 1, vip_expire_time = ?, daily_spins = 3 WHERE user_id = ?", (expire_timestamp, chat_id))
         bot.send_message(chat_id, "🎉 " + str(days) + " Günlük VIP Üyeliğin Tanımlandı!", reply_markup=get_main_keyboard())
     elif payload == "buy_surprise_promo":
-        selected_reward = random.randint(1500, 8000)
-        generated_code = generate_random_code()
-        cursor.execute("INSERT INTO dynamic_promo_codes (code, reward_type, reward_value, is_used) VALUES (?, ?, ?, 0)", (generated_code, "volt", selected_reward))
-        conn.commit()
-        bot.send_message(chat_id, "🎉 Sürpriz Kodun: " + generated_code + " (" + str(selected_reward) + " Volt)", reply_markup=get_main_keyboard())
-    
+        selected_reward = random.randint(1500, 8
