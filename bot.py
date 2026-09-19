@@ -20,19 +20,7 @@ def generate_random_code():
 def db_init():
     conn = sqlite3.connect("cpm_bot.db")
     cursor = conn.cursor()
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        user_id INTEGER PRIMARY KEY,
-        cw_rk_balance INTEGER DEFAULT 0,
-        is_vip BOOLEAN DEFAULT 0,
-        vip_expire_time INTEGER DEFAULT 0,
-        daily_spins INTEGER DEFAULT 1,
-        ticket_rights INTEGER DEFAULT 0,
-        referred_by INTEGER,
-        last_spin_day TEXT DEFAULT '',
-        last_daily_bonus TEXT DEFAULT '',
-        task_count INTEGER DEFAULT 0
-    )""")
+    cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, cw_rk_balance INTEGER DEFAULT 0, is_vip BOOLEAN DEFAULT 0, vip_expire_time INTEGER DEFAULT 0, daily_spins INTEGER DEFAULT 1, ticket_rights INTEGER DEFAULT 0, referred_by INTEGER, last_spin_day TEXT DEFAULT '', last_daily_bonus TEXT DEFAULT '', task_count INTEGER DEFAULT 0)")
     
     migrations = [
         "ALTER TABLE users ADD COLUMN vip_expire_time INTEGER DEFAULT 0",
@@ -49,13 +37,7 @@ def db_init():
         except sqlite3.OperationalError:
             pass
 
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS dynamic_promo_codes (
-        code TEXT PRIMARY KEY,
-        reward_type TEXT,
-        reward_value INTEGER DEFAULT 0,
-        is_used INTEGER DEFAULT 0
-    )""")
+    cursor.execute("CREATE TABLE IF NOT EXISTS dynamic_promo_codes (code TEXT PRIMARY KEY, reward_type TEXT, reward_value INTEGER DEFAULT 0, is_used INTEGER DEFAULT 0)")
     
     try:
         cursor.execute("ALTER TABLE dynamic_promo_codes ADD COLUMN is_used INTEGER DEFAULT 0")
@@ -111,10 +93,7 @@ def get_main_keyboard():
 
 def send_star_invoice(chat_id, title, description, payload, amount_in_stars):
     prices = [telebot.types.LabeledPrice(label=title, amount=amount_in_stars)]
-    bot.send_invoice(
-        chat_id=chat_id, title=title, description=description,
-        invoice_payload=payload, provider_token="", currency="XTR", prices=prices, start_parameter="buy_stars"
-    )
+    bot.send_invoice(chat_id=chat_id, title=title, description=description, invoice_payload=payload, provider_token="", currency="XTR", prices=prices, start_parameter="buy_stars")
 
 @bot.message_handler(commands=['bakim'])
 def toggle_maintenance(message):
@@ -434,4 +413,6 @@ def process_successful_payment(message):
         if account:
             bot.send_message(chat_id, f"🎉 Hesap:\n`{account}`", reply_markup=get_main_keyboard())
         else:
-            cursor.execute("UPDATE users SET cw_rk_balance = cw_rk_balance + 2810 WHERE user_id = ?", 
+            cursor.execute("UPDATE users SET cw_rk_balance = cw_rk_balance + 2810 WHERE user_id = ?", (chat_id,))
+            conn.commit()
+            bot.send_message(chat_id, "⚠️ Stokta hesap kalmadi NEYOM, hesabina 2810 Volt eklendi!", reply_markup=get_main_keyb
