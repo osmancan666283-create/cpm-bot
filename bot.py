@@ -4,6 +4,7 @@ import sqlite3
 import string
 import threading
 import time
+import datetime
 import requests
 from flask import Flask
 import telebot
@@ -36,10 +37,10 @@ def db_init():
         cw_rk_balance INTEGER DEFAULT 0,
         is_vip BOOLEAN DEFAULT 0,
         vip_expire_time INTEGER DEFAULT 0,
-        daily_spins INTEGER DEFAULT 1,
+        daily_spins_used INTEGER DEFAULT 0,
         ticket_rights INTEGER DEFAULT 0,
         referred_by INTEGER,
-        last_spin_day TEXT DEFAULT '',
+        last_spin_date TEXT DEFAULT '',
         last_daily_bonus TEXT DEFAULT '',
         task_count INTEGER DEFAULT 0
     )""")
@@ -48,7 +49,7 @@ def db_init():
 
 db_init()
 
-# Bellek Durum Yönetimi
+# Bellek Durum Yönetimi (State & Temp Data)
 user_states = {}
 user_temp_data = {}
 MAINTENANCE_MODE = False
@@ -127,19 +128,50 @@ def handle_all_messages(message):
 
     conn = sqlite3.connect("cpm_bot.db", check_same_thread=False)
     cursor = conn.cursor()
-    cursor.execute("SELECT cw_rk_balance, is_vip, daily_spins, ticket_rights, task_count FROM users WHERE user_id = ?", (chat_id,))
+    cursor.execute("SELECT cw_rk_balance, is_vip, daily_spins_used, ticket_rights, last_spin_date, task_count FROM users WHERE user_id = ?", (chat_id,))
     row = cursor.fetchone()
     
+    today_str = datetime.date.today().isoformat()
+
     if not row:
-        cursor.execute("INSERT INTO users (user_id) VALUES (?)", (chat_id,))
+        cursor.execute("INSERT INTO users (user_id, last_spin_date) VALUES (?, ?)", (chat_id, today_str))
         conn.commit()
-        cwrk, is_vip, spins, tickets, task_count = 0, 0, 1, 0, 0
+        cwrk, is_vip, spins_used, tickets, last_spin, task_count = 0, 0, 0, 0, today_str, 0
     else:
-        cwrk, is_vip, spins, tickets, task_count = row
+        cwrk, is_vip, spins_used, tickets, last_spin, task_count = row
+        if last_spin != today_str:
+            cursor.execute("UPDATE users SET daily_spins_used = 0, last_spin_date = ? WHERE user_id = ?", (today_str, chat_id))
+            conn.commit()
+            spins_used = 0
 
     current_state = user_states.get(chat_id)
 
-    # --- CPM1 İŞLEMLERİ ---
+    # --- DURUM (STATE) YÖNETİMİ (Mail / Şifre Girişleri) ---
+    if current_state == "waiting_cpm1_mail":
+        user_states[chat_id] = None
+        bot.send_message(chat_id, f"✅ CPM1 E-posta değiştirme talebin alındı NEYOM!\nGirilen E-posta: `{text}`\n⚙️ İşlem sıraya konuldu.", reply_markup=get_main_keyboard())
+        conn.close()
+        return
+
+    elif current_state == "waiting_cpm1_pass":
+        user_states[chat_id] = None
+        bot.send_message(chat_id, f"✅ CPM1 Şifre değiştirme talebin alındı NEYOM!\nGirilen Şifre: `{text}`\n⚙️ İşlem sıraya konuldu.", reply_markup=get_main_keyboard())
+        conn.close()
+        return
+
+    elif current_state == "waiting_cpm2_mail":
+        user_states[chat_id] = None
+        bot.send_message(chat_id, f"✅ CPM2 E-posta değiştirme talebin alındı NEYOM!\nGirilen E-posta: `{text}`\n⚙️ İşlem sıraya konuldu.", reply_markup=get_main_keyboard())
+        conn.close()
+        return
+
+    elif current_state == "waiting_cpm2_pass":
+        user_states[chat_id] = None
+        bot.send_message(chat_id, f"✅ CPM2 Şifre değiştirme talebin alındı NEYOM!\nGirilen Şifre: `{text}`\n⚙️ İşlem sıraya konuldu.", reply_markup=get_main_keyboard())
+        conn.close()
+        return
+
+    # --- CPM1 İŞLEMLERİ ALT MENÜ ---
     if text == "🎮 CPM1 İşlemleri":
         markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
         markup.add(
@@ -151,7 +183,19 @@ def handle_all_messages(message):
         conn.close()
         return
 
-    # --- CPM2 İŞLEMLERİ ---
+    elif text == "🔒 CPM1 Mail Değiş (1 Volt)":
+        user_states[chat_id] = "waiting_cpm1_mail"
+        bot.send_message(chat_id, "📧 Lütfen yeni yapmak istediğin **CPM1 E-posta adresini** yaz NEYOM:")
+        conn.close()
+        return
+
+    elif text == "🔑 CPM1 Şifre Değiş (1 Volt)":
+        user_states[chat_id] = "waiting_cpm1_pass"
+        bot.send_message(chat_id, "🔑 Lütfen yeni yapmak istediğin **CPM1 şifresini** yaz NEYOM:")
+        conn.close()
+        return
+
+    # --- CPM2 İŞLEMLERİ ALT MENÜ ---
     elif text == "🎮 CPM2 İşlemleri":
         markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
         markup.add(
@@ -163,6 +207,19 @@ def handle_all_messages(message):
         conn.close()
         return
 
+    elif text == "🔒 CPM2 Mail Değiş (1 Volt)":
+        user_states[chat_id] = "waiting_cpm2_mail"
+        bot.send_message(chat_id, "📧 Lütfen yeni yapmak istediğin **CPM2 E-posta adresini** yaz NEYOM:")
+        conn.close()
+        return
+
+    elif text == "🔑 CPM2 Şifre Değiş (1 Volt)":
+        user_states[chat_id] = "waiting_cpm2_pass"
+        bot.send_message(chat_id, "🔑 Lütfen yeni yapmak istediğin **CPM2 şifresini** yaz NEYOM:")
+        conn.close()
+        return
+
+    # --- ANA MENÜ VE DİĞER BUTONLAR ---
     elif text == "⬅️ Ana Menü":
         user_states[chat_id] = None
         user_temp_data.pop(chat_id, None)
@@ -171,15 +228,27 @@ def handle_all_messages(message):
         return
 
     elif text == "👤 Profilim":
-        bot.send_message(chat_id, f"👤 **Profil Bilgilerin NEYOM:**\n\n🆔 ID: `{chat_id}`\n⚡ Volt Bakiye: **{cwrk} Volt**\n👑 VIP Durumu: **{'Aktif' if is_vip else 'Normal Üye'}**\n🎫 Bilet Hakları: {tickets}", reply_markup=get_main_keyboard())
+        vip_status_text = "Aktif (5 Hak/Gün)" if is_vip else "Normal Üye (2 Hak/Gün)"
+        bot.send_message(chat_id, f"👤 **Profil Bilgilerin NEYOM:**\n\n🆔 ID: `{chat_id}`\n⚡ Volt Bakiye: **{cwrk} Volt**\n👑 VIP Durumu: **{vip_status_text}**\n🎫 Bilet Hakları: {tickets}", reply_markup=get_main_keyboard())
         conn.close()
         return
 
     elif text == "🎡 Şans Çarkı":
+        max_limit = 5 if is_vip else 2
+        if last_spin != today_str:
+            spins_used = 0
+            
+        if spins_used >= max_limit:
+            bot.send_message(chat_id, f"⚠️ Günlük şans çarkı hakkın bitti NEYOM!\n\n📌 Hakkın: **{spins_used}/{max_limit}**\n💡 Yarın tekrar deneyebilir veya VIP alarak hakkını 5'e çıkarabilirsin!", reply_markup=get_main_keyboard())
+            conn.close()
+            return
+
         reward = random.choice([10, 25, 50, 100, 200])
-        cursor.execute("UPDATE users SET cw_rk_balance = cw_rk_balance + ? WHERE user_id = ?", (reward, chat_id))
+        new_spins_used = spins_used + 1
+        cursor.execute("UPDATE users SET cw_rk_balance = cw_rk_balance + ?, daily_spins_used = ?, last_spin_date = ? WHERE user_id = ?", (reward, new_spins_used, today_str, chat_id))
         conn.commit()
-        bot.send_message(chat_id, f"🎡 Çark çevrildi NEYOM!\n🎁 Kazandığın Ödül: **+{reward} Volt Coin**", reply_markup=get_main_keyboard())
+        
+        bot.send_message(chat_id, f"🎡 Çark çevrildi NEYOM!\n🎁 Kazandığın Ödül: **+{reward} Volt Coin**\n📊 Kalan Hak: **{max_limit - new_spins_used}/{max_limit}**", reply_markup=get_main_keyboard())
         conn.close()
         return
 
@@ -187,6 +256,46 @@ def handle_all_messages(message):
         cursor.execute("UPDATE users SET cw_rk_balance = cw_rk_balance + 20 WHERE user_id = ?", (chat_id,))
         conn.commit()
         bot.send_message(chat_id, "🎁 Günlük bonusun eklendi: **+20 Volt!**", reply_markup=get_main_keyboard())
+        conn.close()
+        return
+
+    elif text == "🛒 VIP Hesap Mağazası":
+        bot.send_message(chat_id, "🛒 **VIP Hesap Mağazası:** Stoklar güncelleniyor NEYOM, yakında aktif olacak.", reply_markup=get_main_keyboard())
+        conn.close()
+        return
+
+    elif text == "⚡ Volt Coin Al":
+        bot.send_message(chat_id, "⚡ Volt Coin kazanmak için **Şans Çarkı** çevirebilir, **Günlük Bonus** alabilir veya **Görev Yapabilirsiniz** NEYOM!", reply_markup=get_main_keyboard())
+        conn.close()
+        return
+
+    elif text == "🎯 Görev Yap & Kazan":
+        bot.send_message(chat_id, "🎯 Aktif görev bulunmuyor NEYOM. İlerleyen saatlerde tekrar kontrol et!", reply_markup=get_main_keyboard())
+        conn.close()
+        return
+
+    elif text == "👑 VIP Üyelik Al":
+        bot.send_message(chat_id, "👑 VIP üyelik sayesinde çark hakkını günde 5'e çıkarabilir ve özel avantajlar elde edebilirsin NEYOM!", reply_markup=get_main_keyboard())
+        conn.close()
+        return
+
+    elif text == "🎟️ Sürpriz Promo Kod Al":
+        bot.send_message(chat_id, "🎟️ Sürpriz promo kodlar yakında dağıtılacak NEYOM, takipte kal!", reply_markup=get_main_keyboard())
+        conn.close()
+        return
+
+    elif text == "🎟️ Promo Kod Kullan":
+        bot.send_message(chat_id, "🎟️ Kullanmak istediğin promo kodu sohbete yazabilirsin NEYOM (Yapım aşamasında).", reply_markup=get_main_keyboard())
+        conn.close()
+        return
+
+    elif text == "🎫 Biletlerim & Kullan":
+        bot.send_message(chat_id, f"🎫 Aktif bilet hakkın: **{tickets} adet**", reply_markup=get_main_keyboard())
+        conn.close()
+        return
+
+    elif text == "👥 Arkadaşını Davet Et":
+        bot.send_message(chat_id, f"👥 Arkadaşını davet et linkin:\n`https://t.me/Cpm1_hesapSatis_bot?start={chat_id}`\n\nHer davet ettiğin arkadaşın için ödül kazanırsın NEYOM!", reply_markup=get_main_keyboard())
         conn.close()
         return
 
@@ -202,4 +311,4 @@ if __name__ == "__main__":
     
     print("Bot ve Web Sunucusu Başlatıldı...")
     bot.infinity_polling()
-    
+                       
