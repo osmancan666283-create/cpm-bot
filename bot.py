@@ -423,4 +423,5 @@ def process_successful_payment(message):
         generated_code = generate_random_code()
         cursor.execute("INSERT INTO dynamic_promo_codes (code, reward_type, reward_value, is_used) VALUES (?, ?, ?, 0)", (generated_code, "volt", selected_reward))
         conn.commit()
-        bot.send_message(chat_id, "🎉 Sürpriz Kodun: `" + generated_code + "` (" + str(selected_reward) + " Volt)", reply_markup=get_main_keyboard()
+        msg_text = "🎉 Surpriz Kodun: " + generated_code + " (" + str(selected_reward) + " Volt)"
+        bot.send_message(chat_id, msg_text, reply_
