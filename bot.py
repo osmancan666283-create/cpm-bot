@@ -308,7 +308,7 @@ def handle_menu_clicks(message):
             if account:
                 cursor.execute("UPDATE users SET cw_rk_balance = cw_rk_balance - 3 WHERE user_id = ?", (chat_id,))
                 conn.commit()
-                bot.send_message(chat_id, f"🎉 Hesap:\n`{account}`", reply_markup=get_main_keyboard())
+                bot.send_message(chat_id, "🎉 Hesap:\n`" + account + "`", reply_markup=get_main_keyboard())
             else:
                 cursor.execute("UPDATE users SET cw_rk_balance = (cw_rk_balance - 3) + 2810 WHERE user_id = ?", (chat_id,))
                 conn.commit()
@@ -427,4 +427,4 @@ def process_successful_payment(message):
     elif payload == "buy_vip_acc_star":
         account = get_account_from_github_stock()
         if account:
-            bot.send_message(chat_id, f"🎉 Hesap:\n`{account}`"
+            bot.send_message(chat_id, "🎉 Hesap:\n`" + acc
