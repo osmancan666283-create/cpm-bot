@@ -439,4 +439,4 @@ def process_successful_payment(message):
         conn.commit()
         bot.send_message(chat_id, f"🎉 Sürpriz Kodun: {generated_code} ({selected_reward} Volt)", reply_markup=get_main_keyboard())
     elif payload == "buy_vip_acc_star":
-    
+            
