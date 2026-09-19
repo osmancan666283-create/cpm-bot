@@ -1,173 +1,205 @@
 import os
-import sqlite3
 import random
-from threading import Thread
+import sqlite3
+import string
+import threading
+import time
+import requests
 from flask import Flask
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
+import telebot
 
-# --- FLASK KEEP-ALIVE (Render için zorunlu web sunucusu) ---
+# --- 1. AYARLAR VE TOKEN ---
+TOKEN = "8860966276:AAGoD1jxA8vY-nTBttAuWgQOkUvMFWtQVsg"
+ADMIN_ID = 8520025523
+GITHUB_STOCK_URL = "https://raw.githubusercontent.com/osmancan666283-create/cpm-bot/main/stok.txt"
+
+bot = telebot.TeleBot(TOKEN, parse_mode="Markdown")
+
+# --- 2. FLASK KEEP-ALIVE (Sunucu Çökmesini Önleyen Web Katmanı) ---
 app = Flask('')
 
 @app.route('/')
 def home():
-    print("Ping alındı, bot aktif!")
-    return "Bot Aktif ve Çalışıyor, NEYOM!"
+    return "Volt Coin CPM Bot 7/24 Aktif ve Çalışıyor, NEYOM!"
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
-def keep_alive():
-    t = Thread(target=run_flask)
+# --- 3. VERİTABANI BAĞLANTISI VE TABLOLAR ---
+def db_init():
+    conn = sqlite3.connect("cpm_bot.db", check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY,
+        cw_rk_balance INTEGER DEFAULT 0,
+        is_vip BOOLEAN DEFAULT 0,
+        vip_expire_time INTEGER DEFAULT 0,
+        daily_spins INTEGER DEFAULT 1,
+        ticket_rights INTEGER DEFAULT 0,
+        referred_by INTEGER,
+        last_spin_day TEXT DEFAULT '',
+        last_daily_bonus TEXT DEFAULT '',
+        task_count INTEGER DEFAULT 0
+    )""")
+    conn.commit()
+    conn.close()
+
+db_init()
+
+# Bellek Durum Yönetimi
+user_states = {}
+user_temp_data = {}
+MAINTENANCE_MODE = False
+
+# --- 4. ANA KLAVYE MENÜSÜ ---
+def get_main_keyboard():
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup.add(
+        telebot.types.KeyboardButton("🛒 VIP Hesap Mağazası"),
+        telebot.types.KeyboardButton("⚡ Volt Coin Al"),
+        telebot.types.KeyboardButton("🎁 Günlük Bonus (+20 Volt)"),
+        telebot.types.KeyboardButton("🎯 Görev Yap & Kazan"),
+        telebot.types.KeyboardButton("👑 VIP Üyelik Al"),
+        telebot.types.KeyboardButton("🎡 Şans Çarkı"),
+        telebot.types.KeyboardButton("🎟️ Sürpriz Promo Kod Al"),
+        telebot.types.KeyboardButton("🎟️ Promo Kod Kullan"),
+        telebot.types.KeyboardButton("🎫 Biletlerim & Kullan"),
+        telebot.types.KeyboardButton("🎮 CPM1 İşlemleri"),
+        telebot.types.KeyboardButton("🎮 CPM2 İşlemleri"),
+        telebot.types.KeyboardButton("👥 Arkadaşını Davet Et"),
+        telebot.types.KeyboardButton("👤 Profilim")
+    )
+    return markup
+
+# --- 5. KOMUTLAR VE BAŞLANGIÇ ---
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    chat_id = message.chat.id
+    if MAINTENANCE_MODE and chat_id != ADMIN_ID:
+        bot.send_message(chat_id, "🛠️ Bot şu an bakımda NEYOM, birazdan aktif olur.")
+        return
+
+    conn = sqlite3.connect("cpm_bot.db", check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (chat_id,))
+    if not cursor.fetchone():
+        cursor.execute("INSERT INTO users (user_id) VALUES (?)", (chat_id,))
+        conn.commit()
+    conn.close()
+
+    bot.send_message(chat_id, "👋 Hoş Geldin NEYOM! Volt Coin CPM Yönetim Paneline bağlandın. Seçimini yap:", reply_markup=get_main_keyboard())
+
+@bot.message_handler(commands=['bakim'])
+def toggle_maintenance(message):
+    global MAINTENANCE_MODE
+    if message.from_user.id != ADMIN_ID:
+        return
+    MAINTENANCE_MODE = not MAINTENANCE_MODE
+    bot.send_message(message.chat.id, "⚙️ Bakım Modu: " + ("ACILDI" if MAINTENANCE_MODE else "KAPATILDI"))
+
+@bot.message_handler(commands=['ekle'])
+def admin_add_balance(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    args = message.text.split()
+    if len(args) != 3 or not args[1].isdigit() or not args[2].isdigit():
+        bot.send_message(message.chat.id, "Kullanım: /ekle <user_id> <miktar>")
+        return
+    target_id, amount = int(args[1]), int(args[2])
+    conn = sqlite3.connect("cpm_bot.db", check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET cw_rk_balance = cw_rk_balance + ? WHERE user_id = ?", (amount, target_id))
+    conn.commit()
+    conn.close()
+    bot.send_message(message.chat.id, f"✅ {target_id} ID'li kullanıcıya +{amount} Volt eklendi.")
+
+# --- 6. TÜM MENÜ VE BUTON YÖNETİMİ ---
+@bot.message_handler(func=lambda message: True)
+def handle_all_messages(message):
+    chat_id = message.chat.id
+    text = message.text
+
+    if MAINTENANCE_MODE and chat_id != ADMIN_ID:
+        bot.send_message(chat_id, "🛠️ Bot bakımda.")
+        return
+
+    conn = sqlite3.connect("cpm_bot.db", check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("SELECT cw_rk_balance, is_vip, daily_spins, ticket_rights, task_count FROM users WHERE user_id = ?", (chat_id,))
+    row = cursor.fetchone()
+    
+    if not row:
+        cursor.execute("INSERT INTO users (user_id) VALUES (?)", (chat_id,))
+        conn.commit()
+        cwrk, is_vip, spins, tickets, task_count = 0, 0, 1, 0, 0
+    else:
+        cwrk, is_vip, spins, tickets, task_count = row
+
+    current_state = user_states.get(chat_id)
+
+    # --- CPM1 İŞLEMLERİ ---
+    if text == "🎮 CPM1 İşlemleri":
+        markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
+        markup.add(
+            telebot.types.KeyboardButton("🔒 CPM1 Mail Değiş (1 Volt)"),
+            telebot.types.KeyboardButton("🔑 CPM1 Şifre Değiş (1 Volt)"),
+            telebot.types.KeyboardButton("⬅️ Ana Menü")
+        )
+        bot.send_message(chat_id, "🎮 **CPM1 İşlem Paneli:**", reply_markup=markup)
+        conn.close()
+        return
+
+    # --- CPM2 İŞLEMLERİ ---
+    elif text == "🎮 CPM2 İşlemleri":
+        markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
+        markup.add(
+            telebot.types.KeyboardButton("🔒 CPM2 Mail Değiş (1 Volt)"),
+            telebot.types.KeyboardButton("🔑 CPM2 Şifre Değiş (1 Volt)"),
+            telebot.types.KeyboardButton("⬅️ Ana Menü")
+        )
+        bot.send_message(chat_id, "🎮 **CPM2 İşlem Paneli:**", reply_markup=markup)
+        conn.close()
+        return
+
+    elif text == "⬅️ Ana Menü":
+        user_states[chat_id] = None
+        user_temp_data.pop(chat_id, None)
+        bot.send_message(chat_id, "✅ Ana Menüdesin NEYOM.", reply_markup=get_main_keyboard())
+        conn.close()
+        return
+
+    elif text == "👤 Profilim":
+        bot.send_message(chat_id, f"👤 **Profil Bilgilerin NEYOM:**\n\n🆔 ID: `{chat_id}`\n⚡ Volt Bakiye: **{cwrk} Volt**\n👑 VIP Durumu: **{'Aktif' if is_vip else 'Normal Üye'}**\n🎫 Bilet Hakları: {tickets}", reply_markup=get_main_keyboard())
+        conn.close()
+        return
+
+    elif text == "🎡 Şans Çarkı":
+        reward = random.choice([10, 25, 50, 100, 200])
+        cursor.execute("UPDATE users SET cw_rk_balance = cw_rk_balance + ? WHERE user_id = ?", (reward, chat_id))
+        conn.commit()
+        bot.send_message(chat_id, f"🎡 Çark çevrildi NEYOM!\n🎁 Kazandığın Ödül: **+{reward} Volt Coin**", reply_markup=get_main_keyboard())
+        conn.close()
+        return
+
+    elif text == "🎁 Günlük Bonus (+20 Volt)":
+        cursor.execute("UPDATE users SET cw_rk_balance = cw_rk_balance + 20 WHERE user_id = ?", (chat_id,))
+        conn.commit()
+        bot.send_message(chat_id, "🎁 Günlük bonusun eklendi: **+20 Volt!**", reply_markup=get_main_keyboard())
+        conn.close()
+        return
+
+    else:
+        bot.send_message(chat_id, "Seçimin alındı NEYOM. İşleminiz işleniyor...", reply_markup=get_main_keyboard())
+        conn.close()
+
+# --- 7. ÇALIŞTIRMA BLOĞU ---
+if __name__ == "__main__":
+    t = threading.Thread(target=run_flask)
     t.daemon = True
     t.start()
-
-# --- VERİTABANI BAĞLANTISI VE KURULUMU ---
-def init_db():
-    conn = sqlite3.connect('bot_database.db')
-    cursor = conn.cursor()
-    # Kullanıcılar Tablosu
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            username TEXT,
-            balance INTEGER DEFAULT 0,
-            vip_status INTEGER DEFAULT 0
-        )
-    ''')
-    # Biletler Tablosu
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS tickets (
-            ticket_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            subject TEXT,
-            status TEXT DEFAULT 'Açık'
-        )
-    ''')
-    conn.commit()
-    conn.close()
-
-init_db()
-
-# --- BOT KOMUTLARI VE MENÜLER ---
-TOKEN = os.environ.get("BOT_TOKEN", "BURAYA_BOT_TOKEN_YAZILACAK")
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    conn = sqlite3.connect('bot_database.db')
-    cursor = conn.cursor()
-    cursor.execute('INSERT OR IGNORE INTO users (user_id, username, balance, vip_status) VALUES (?, ?, 100, 0)', 
-                   (user.id, user.username))
-    conn.commit()
-    conn.close()
-
-    keyboard = [
-        [InlineKeyboardButton("🎮 CPM / PUBG Menüsü", callback_data='menu_cpm')],
-        [InlineKeyboardButton("🎡 Şans Çarkı", callback_data='menu_wheel'), InlineKeyboardButton("💎 VIP Sistemi", callback_data='menu_vip')],
-        [InlineKeyboardButton("🎟️ Destek Biletlerim", callback_data='menu_tickets'), InlineKeyboardButton("👤 Profilim", callback_data='menu_profile')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(
-        f"Selamlar NEYOM! 👑 Botun ana paneline hoş geldin.\n"
-        f"İşlemlerini aşağıdaki menüden seçebilirsin:",
-        reply_markup=reply_markup
-    )
-
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-
-    if data == 'menu_cpm':
-        keyboard = [
-            [InlineKeyboardButton("🔄 CPM 1 Mail / Şifre Değiştir", callback_data='cpm1_mail')],
-            [InlineKeyboardButton("🔄 CPM 2 Mail / Şifre Değiştir", callback_data='cpm2_mail')],
-            [InlineKeyboardButton("🔙 Ana Menü", callback_data='main_menu')]
-        ]
-        await query.edit_message_text("🛠️ **Hesap Yönetim ve Değişim Menüsü**\n\nİstediğin işlemi seç:", reply_markup=InlineKeyboardMarkup(keyboard))
-
-    elif data == 'cpm1_mail':
-        await query.edit_message_text("📧 **CPM 1 Mail ve Şifre Değiştirme**\n\nLütfen yeni mail ve şifreyi `mail:sifre` formatında gönderin veya işlem için talimatları takip edin.\n\n🔙 [Geri Dön](tg://btn_menu_cpm)", parse_mode="Markdown")
-
-    elif data == 'cpm2_mail':
-        await query.edit_message_text("📧 **CPM 2 Mail ve Şifre Değiştirme**\n\nCPM2 sistemine ait değişim paneli aktif. Bilgileri girerek güncelleyebilirsin.\n\n🔙 [Geri Dön](tg://btn_menu_cpm)", parse_mode="Markdown")
-
-    elif data == 'menu_wheel':
-        reward = random.choice([10, 25, 50, 100, 250, 500])
-        conn = sqlite3.connect('bot_database.db')
-        cursor = conn.cursor()
-        cursor.execute('UPDATE users SET balance = balance + ? WHERE user_id = ?', (reward, query.from_user.id))
-        conn.commit()
-        conn.close()
-        
-        keyboard = [[InlineKeyboardButton("🔄 Tekrar Çevir", callback_data='menu_wheel')], [InlineKeyboardButton("🔙 Ana Menü", callback_data='main_menu')]]
-        await query.edit_message_text(f"🎡 Çark çevrildi!\n🎁 Kazandığın Ödül: **{reward} Bakiye** Puan!", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-
-    elif data == 'menu_vip':
-        keyboard = [[InlineKeyboardButton("🌟 VIP Üyelik Satın Al (500 Puan)", callback_data='buy_vip')], [InlineKeyboardButton("🔙 Ana Menü", callback_data='main_menu')]]
-        await query.edit_message_text("💎 **VIP Sistemine Hoş Geldin!**\n\nVIP üyeler özel komutlara ve ekstra indirimlere sahip olur.", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-
-    elif data == 'buy_vip':
-        conn = sqlite3.connect('bot_database.db')
-        cursor = conn.cursor()
-        cursor.execute('SELECT balance, vip_status FROM users WHERE user_id = ?', (query.from_user.id,))
-        res = cursor.fetchone()
-        if res and res[0] >= 500:
-            cursor.execute('UPDATE users SET balance = balance - 500, vip_status = 1 WHERE user_id = ?', (query.from_user.id,))
-            conn.commit()
-            conn.close()
-            await query.edit_message_text("Tebrikler! VIP üyelik başarıyla tanımlandı. 🎉\n\n🔙 Ana menüye dönmek için /start komutunu kullanabilirsin.")
-        else:
-            conn.close()
-            await query.edit_message_text("⚠️ Yetersiz bakiye! Çark çevirerek bakiye kazanabilirsin.\n\n🔙 Ana menüye dönmek için /start komutunu kullanabilirsin.")
-
-    elif data == 'menu_tickets':
-        keyboard = [[InlineKeyboardButton("➕ Yeni Bilet Aç", callback_data='new_ticket')], [InlineKeyboardButton("🔙 Ana Menü", callback_data='main_menu')]]
-        await query.edit_message_text("🎟️ Destek taleplerin burada listelenir.", reply_markup=InlineKeyboardMarkup(keyboard))
-
-    elif data == 'new_ticket':
-        conn = sqlite3.connect('bot_database.db')
-        cursor = conn.cursor()
-        cursor.execute('INSERT INTO tickets (user_id, subject) VALUES (?, ?)', (query.from_user.id, "Genel Destek Talebi"))
-        conn.commit()
-        conn.close()
-        await query.edit_message_text("✅ Destek biletiniz başarıyla açıldı! En kısa sürede ilgilenilecektir.\n\n🔙 [Ana Menüye Dön](tg://btn_main)", parse_mode="Markdown")
-
-    elif data == 'menu_profile':
-        conn = sqlite3.connect('bot_database.db')
-        cursor = conn.cursor()
-        cursor.execute('SELECT balance, vip_status FROM users WHERE user_id = ?', (query.from_user.id,))
-        res = cursor.fetchone()
-        conn.close()
-        balance = res[0] if res else 0
-        vip = "Aktif 🌟" if res and res[1] == 1 else "Normal Üye"
-        
-        keyboard = [[InlineKeyboardButton("🔙 Ana Menü", callback_data='main_menu')]]
-        await query.edit_message_text(f"👤 **Profil Bilgilerin:**\n\nID: `{query.from_user.id}`\nKullanıcı: @{query.from_user.username}\nBakiye: **{balance} Puan**\nDurum: **{vip}**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-
-    elif data == 'main_menu':
-        keyboard = [
-            [InlineKeyboardButton("🎮 CPM / PUBG Menüsü", callback_data='menu_cpm')],
-            [InlineKeyboardButton("🎡 Şans Çarkı", callback_data='menu_wheel'), InlineKeyboardButton("💎 VIP Sistemi", callback_data='menu_vip')],
-            [InlineKeyboardButton("🎟️ Destek Biletlerim", callback_data='menu_tickets'), InlineKeyboardButton("👤 Profilim", callback_data='menu_profile')]
-        ]
-        await query.edit_message_text("Ana menüye döndün NEYOM:", reply_markup=InlineKeyboardMarkup(keyboard))
-
-def main():
-    # Flask sunucusunu arka planda başlat (Render port hatasını önler)
-    keep_alive()
-    
-    # Telegram Bot uygulamasını başlat
-    application = Application.builder().token(TOKEN).build()
-
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CallbackQueryHandler(button_handler))
-
-    print("Bot başarıyla başlatıldı ve dinleniyor...")
-    application.run_polling()
-
-if __name__ == '__main__':
-    main()
+    print("Bot ve Web Sunucusu Başlatıldı...")
+    bot.infinity_polling()
     
