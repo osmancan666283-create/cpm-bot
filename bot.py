@@ -20,7 +20,7 @@ def generate_random_code():
 def db_init():
     conn = sqlite3.connect("cpm_bot.db")
     cursor = conn.cursor()
-    cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, cw_rk_balance INTEGER DEFAULT 0, is_vip BOOLEAN DEFAULT 0, vip_expire_time INTEGER DEFAULT 0, daily_spins INTEGER DEFAULT 1, ticket_rights INTEGER DEFAULT 0, referred_by INTEGER, last_spin_day TEXT DEFAULT '', last_daily_bonus TEXT DEFAULT '', task_count INTEGER DEFAULT 0)")
+    cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, cw_rk_balance REAL DEFAULT 0, is_vip BOOLEAN DEFAULT 0, vip_expire_time INTEGER DEFAULT 0, daily_spins INTEGER DEFAULT 1, ticket_rights INTEGER DEFAULT 0, referred_by INTEGER, last_spin_day TEXT DEFAULT '', last_daily_bonus TEXT DEFAULT '', task_count INTEGER DEFAULT 0)")
     
     migrations = [
         "ALTER TABLE users ADD COLUMN vip_expire_time INTEGER DEFAULT 0",
@@ -37,7 +37,7 @@ def db_init():
         except sqlite3.OperationalError:
             pass
 
-    cursor.execute("CREATE TABLE IF NOT EXISTS dynamic_promo_codes (code TEXT PRIMARY KEY, reward_type TEXT, reward_value INTEGER DEFAULT 0, is_used INTEGER DEFAULT 0)")
+    cursor.execute("CREATE TABLE IF NOT EXISTS dynamic_promo_codes (code TEXT PRIMARY KEY, reward_type TEXT, reward_value REAL DEFAULT 0, is_used INTEGER DEFAULT 0)")
     
     try:
         cursor.execute("ALTER TABLE dynamic_promo_codes ADD COLUMN is_used INTEGER DEFAULT 0")
@@ -103,38 +103,6 @@ def toggle_maintenance(message):
     MAINTENANCE_MODE = not MAINTENANCE_MODE
     bot.send_message(message.chat.id, "⚙️ Bakım Durumu: " + ("ACILDI" if MAINTENANCE_MODE else "KAPATILDI"))
 
-@bot.message_handler(commands=['toplukod'])
-def admin_create_bulk_codes(message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    args = message.text.split()
-    if len(args) != 2 or not args[1].isdigit():
-        bot.send_message(message.chat.id, "Kullanim: /toplukod <adet>")
-        return
-    
-    count = int(args[1])
-    if count > 200:
-        bot.send_message(message.chat.id, "⚠️ Tek seferde en fazla 200 kod üretebilirsin.")
-        return
-
-    conn = sqlite3.connect("cpm_bot.db")
-    cursor = conn.cursor()
-    generated_list = []
-    for _ in range(count):
-        code = generate_random_code()
-        reward_val = random.randint(1500, 8000)
-        cursor.execute("INSERT OR REPLACE INTO dynamic_promo_codes (code, reward_type, reward_value, is_used) VALUES (?, ?, ?, 0)", (code, "volt", reward_val))
-        generated_list.append(f"`{code}` ({reward_val} Volt)")
-
-    conn.commit()
-    conn.close()
-
-    bot.send_message(message.chat.id, f"✅ Başarıyla {count} adet kod üretildi!")
-    chunk_size = 30
-    for i in range(0, len(generated_list), chunk_size):
-        text_chunk = "\n".join(generated_list[i:i + chunk_size])
-        bot.send_message(message.chat.id, f"📋 **Kod Listesi:**\n\n" + text_chunk)
-
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     chat_id = message.chat.id
@@ -168,10 +136,16 @@ def admin_add_balance(message):
     if message.from_user.id != ADMIN_ID:
         return
     args = message.text.split()
-    if len(args) != 3 or not args[1].isdigit() or not args[2].isdigit():
+    if len(args) != 3:
         bot.send_message(message.chat.id, "Kullanim: /ekle <user_id> <miktar>")
         return
-    target_id, amount = int(args[1]), int(args[2])
+    try:
+        target_id = int(args[1])
+        amount = float(args[2])
+    except Exception:
+        bot.send_message(message.chat.id, "Kullanim: /ekle <user_id> <miktar>")
+        return
+
     conn = sqlite3.connect("cpm_bot.db")
     cursor = conn.cursor()
     cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (target_id,))
@@ -182,19 +156,6 @@ def admin_add_balance(message):
     conn.commit()
     conn.close()
     bot.send_message(message.chat.id, f"✅ {target_id} ID'li kullanıcıya +{amount} Volt eklendi.")
-
-@bot.message_handler(commands=['sifirla'])
-def admin_reset_db(message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    conn = sqlite3.connect("cpm_bot.db")
-    cursor = conn.cursor()
-    cursor.execute("DROP TABLE IF EXISTS users")
-    cursor.execute("DROP TABLE IF EXISTS dynamic_promo_codes")
-    conn.commit()
-    conn.close()
-    db_init()
-    bot.send_message(message.chat.id, "🗑️ Veritabanı sıfırlandı!")
 
 @bot.message_handler(func=lambda message: True)
 def handle_menu_clicks(message):
@@ -245,7 +206,7 @@ def handle_menu_clicks(message):
         user_states[chat_id] = None
         task_count += 1
         if task_count >= 15:
-            won_reward = random.choice([250, 500, 750, 1000])
+            won_reward = round(random.uniform(1.0, 5.0), 2)
             cursor.execute("UPDATE users SET cw_rk_balance = cw_rk_balance + ?, task_count = 15 WHERE user_id = ?", (won_reward, chat_id))
             conn.commit()
             bot.send_message(chat_id, f"🎉 15 Görev Tamamlandı! +{won_reward} Volt Eklendi!", reply_markup=get_main_keyboard())
@@ -255,7 +216,7 @@ def handle_menu_clicks(message):
             bot.send_message(chat_id, f"✅ Kaydedildi! İlerleme: {task_count} / 15", reply_markup=get_main_keyboard())
 
     elif text == "⚡ Volt Coin Al":
-        bot.send_message(chat_id, "⚡ Çok Pahalı Volt Paketleri Seçin (1'den 5800'e kadar):", reply_markup=telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2).add(
+        bot.send_message(chat_id, "⚡ Volt Paketleri Seçin:", reply_markup=telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2).add(
             telebot.types.KeyboardButton("⚡ 1 Volt (50 ⭐)"),
             telebot.types.KeyboardButton("⚡ 500 Volt (350 ⭐)"),
             telebot.types.KeyboardButton("⚡ 1500 Volt (950 ⭐)"),
@@ -329,9 +290,13 @@ def handle_menu_clicks(message):
             conn.commit()
 
         if spins <= 0:
-            bot.send_message(chat_id, "❌ Hakkın bitti!", reply_markup=get_main_keyboard())
+            bot.send_message(chat_id, "❌ Günlük çevirme hakkın bitti!", reply_markup=get_main_keyboard())
         else:
-            won = random.choice([250, 500, 750, 1000])
+            if is_user_vip:
+                won = round(random.uniform(1.0, 7.0), 2)
+            else:
+                won = round(random.uniform(1.0, 1.5), 2)
+
             new_spins = spins - 1
             cursor.execute("UPDATE users SET cw_rk_balance = cw_rk_balance + ?, daily_spins = ? WHERE user_id = ?", (won, new_spins, chat_id))
             conn.commit()
@@ -423,4 +388,3 @@ def process_successful_payment(message):
 db_init()
 print("Bot Çalışıyor ve Dinlemede...")
 bot.infinity_polling(none_stop=True)
-                           
