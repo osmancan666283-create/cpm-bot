@@ -374,18 +374,18 @@ def handle_menu_clicks(message):
 
     elif text == "👥 Arkadaşını Davet Et":
         try:
-            invite_link = f"https://t.me/{bot.get_me().username}?start={chat_id}"
+            invite_link = "https://t.me/" + bot.get_me().username + "?start=" + str(chat_id)
         except Exception:
-            invite_link = f"https://t.me/BotHazirlikBot?start={chat_id}"
-        bot.send_message(chat_id, f"👥 Davet Linkin:\n`{invite_link}`", reply_markup=get_main_keyboard())
+            invite_link = "https://t.me/BotHazirlikBot?start=" + str(chat_id)
+        bot.send_message(chat_id, "👥 Davet Linkin:\n`" + invite_link + "`", reply_markup=get_main_keyboard())
 
     elif text == "👤 Profilim":
         if is_user_vip:
             remaining_days = get_remaining_vip_days(vip_expire)
-            vip_text = f"👑 VIP Üye (Kalan: {remaining_days} gün)"
+            vip_text = "👑 VIP Üye (Kalan: " + str(remaining_days) + " gün)"
         else:
             vip_text = "👤 Normal Üye"
-        bot.send_message(chat_id, f"👤 Profil\n🆔 ID: `{chat_id}`\n⚡ Bakiye: {cwrk} Volt\nDurum: {vip_text}", reply_markup=get_main_keyboard())
+        bot.send_message(chat_id, "👤 Profil\n🆔 ID: `" + str(chat_id) + "`\n⚡ Bakiye: " + str(cwrk) + " Volt\nDurum: " + vip_text, reply_markup=get_main_keyboard())
 
     else:
         bot.send_message(chat_id, "Geçerli bir seçim yapın.", reply_markup=get_main_keyboard())
@@ -427,4 +427,4 @@ def process_successful_payment(message):
     elif payload == "buy_vip_acc_star":
         account = get_account_from_github_stock()
         if account:
-            bot.send_message(chat_id, "🎉 Hesap:\n`" + acc
+     
