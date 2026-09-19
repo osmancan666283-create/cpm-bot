@@ -63,6 +63,13 @@ def check_vip_status(user_id):
     conn.close()
     return False
 
+def get_remaining_vip_days(expire_time):
+    now = int(time.time())
+    if expire_time > now:
+        remaining_seconds = expire_time - now
+        return max(1, remaining_seconds // 86400)
+    return 0
+
 def get_account_from_github_stock():
     try:
         response = requests.get(GITHUB_STOCK_URL, timeout=5)
@@ -108,22 +115,34 @@ def admin_give_vip(message):
     if message.from_user.id != ADMIN_ID:
         return
     args = message.text.split()
-    if len(args) != 2 or not args[1].isdigit():
-        bot.send_message(message.chat.id, "Kullanim: /vipver <user_id>")
+    if len(args) < 2 or not args[1].isdigit():
+        bot.send_message(message.chat.id, "Kullanim: /vipver <user_id> [gun_sayisi]")
         return
     
     target_id = int(args[1])
-    expire_timestamp = int(time.time()) + (30 * 24 * 3600) # 30 günlük VIP
+    days = int(args[2]) if len(args) > 2 and args[2].isdigit() else 30
+    
     conn = sqlite3.connect("cpm_bot.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (target_id,))
-    if not cursor.fetchone():
+    cursor.execute("SELECT is_vip, vip_expire_time FROM users WHERE user_id = ?", (target_id,))
+    row = cursor.fetchone()
+    
+    current_time = int(time.time())
+    if row and row[0] == 1 and row[1] > current_time:
+        base_time = row[1]
+    else:
+        base_time = current_time
+
+    expire_timestamp = base_time + (days * 24 * 3600)
+
+    if not row:
         cursor.execute("INSERT INTO users (user_id, is_vip, vip_expire_time, daily_spins) VALUES (?, 1, ?, 3)", (target_id, expire_timestamp))
     else:
         cursor.execute("UPDATE users SET is_vip = 1, vip_expire_time = ?, daily_spins = 3 WHERE user_id = ?", (expire_timestamp, target_id))
+    
     conn.commit()
     conn.close()
-    bot.send_message(message.chat.id, f"✅ {target_id} ID'li kullanıcıya 30 günlük VIP üyelik tanımlandı!")
+    bot.send_message(message.chat.id, f"✅ {target_id} ID'li kullanıcıya {days} günlük VIP üyelik eklendi!")
 
 @bot.message_handler(commands=['ekle'])
 def admin_add_balance(message):
@@ -191,14 +210,14 @@ def handle_menu_clicks(message):
     is_user_vip = check_vip_status(chat_id)
     conn = sqlite3.connect("cpm_bot.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT cw_rk_balance, is_vip, daily_spins, ticket_rights, last_spin_day, last_daily_bonus, task_count FROM users WHERE user_id = ?", (chat_id,))
+    cursor.execute("SELECT cw_rk_balance, is_vip, vip_expire_time, daily_spins, ticket_rights, last_spin_day, last_daily_bonus, task_count FROM users WHERE user_id = ?", (chat_id,))
     row = cursor.fetchone()
     if not row:
         cursor.execute("INSERT INTO users (user_id) VALUES (?)", (chat_id,))
         conn.commit()
-        row = (0, 0, 1, 0, '', '', 0)
+        row = (0, 0, 0, 1, 0, '', '', 0)
     
-    cwrk, is_vip, spins, tickets, last_day, last_bonus, task_count = row
+    cwrk, is_vip, vip_expire, spins, tickets, last_day, last_bonus, task_count = row
     today = time.strftime("%Y-%m-%d")
 
     if text == "⬅️ Ana Menü":
@@ -361,7 +380,11 @@ def handle_menu_clicks(message):
         bot.send_message(chat_id, f"👥 Davet Linkin:\n`{invite_link}`", reply_markup=get_main_keyboard())
 
     elif text == "👤 Profilim":
-        vip_text = "👑 VIP Üye" if is_user_vip else "👤 Normal Üye"
+        if is_user_vip:
+            remaining_days = get_remaining_vip_days(vip_expire)
+            vip_text = f"👑 VIP Üye (Kalan: {remaining_days} gün)"
+        else:
+            vip_text = "👤 Normal Üye"
         bot.send_message(chat_id, f"👤 Profil\n🆔 ID: `{chat_id}`\n⚡ Bakiye: {cwrk} Volt\nDurum: {vip_text}", reply_markup=get_main_keyboard())
 
     else:
@@ -386,9 +409,15 @@ def process_successful_payment(message):
         cursor.execute("UPDATE users SET cw_rk_balance = cw_rk_balance + ? WHERE user_id = ?", (amt, chat_id))
         bot.send_message(chat_id, f"🎉 +{amt} Volt Yüklendi!", reply_markup=get_main_keyboard())
     elif payload.startswith("buy_vip_"):
-        expire_timestamp = int(time.time()) + (7 * 24 * 3600 if payload == "buy_vip_7d" else 30 * 24 * 3600)
+        days = 7 if payload == "buy_vip_7d" else (90 if payload == "buy_vip_3m" else 30)
+        cursor.execute("SELECT vip_expire_time FROM users WHERE user_id = ?", (chat_id,))
+        row = cursor.fetchone()
+        current_time = int(time.time())
+        base_time = row[0] if row and row[0] > current_time else current_time
+        expire_timestamp = base_time + (days * 24 * 3600)
+        
         cursor.execute("UPDATE users SET is_vip = 1, vip_expire_time = ?, daily_spins = 3 WHERE user_id = ?", (expire_timestamp, chat_id))
-        bot.send_message(chat_id, f"🎉 VIP Üyeliğin Tanımlandı!", reply_markup=get_main_keyboard())
+        bot.send_message(chat_id, f"🎉 {days} Günlük VIP Üyeliğin Tanımlandı!", reply_markup=get_main_keyboard())
     elif payload == "buy_surprise_promo":
         selected_reward = random.randint(1500, 8000)
         generated_code = generate_random_code()
@@ -398,16 +427,4 @@ def process_successful_payment(message):
     elif payload == "buy_vip_acc_star":
         account = get_account_from_github_stock()
         if account:
-            bot.send_message(chat_id, f"🎉 Hesap:\n`{account}`", reply_markup=get_main_keyboard())
-        else:
-            cursor.execute("UPDATE users SET cw_rk_balance = cw_rk_balance + 2810 WHERE user_id = ?", (chat_id,))
-            conn.commit()
-            bot.send_message(chat_id, "⚠️ Stokta hesap kalmadi, hesabina 2810 Volt eklendi!", reply_markup=get_main_keyboard())
-
-    conn.commit()
-    conn.close()
-
-db_init()
-print("Bot Çalışıyor ve Dinlemede...")
-bot.infinity_polling(none_stop=True)
-        
+            bot.send_message(chat_id, f"🎉 Hesap:\n`{account}`"
