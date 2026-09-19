@@ -103,6 +103,54 @@ def toggle_maintenance(message):
     MAINTENANCE_MODE = not MAINTENANCE_MODE
     bot.send_message(message.chat.id, "⚙️ Bakım Durumu: " + ("ACILDI" if MAINTENANCE_MODE else "KAPATILDI"))
 
+@bot.message_handler(commands=['vipver'])
+def admin_give_vip(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    args = message.text.split()
+    if len(args) != 2 or not args[1].isdigit():
+        bot.send_message(message.chat.id, "Kullanim: /vipver <user_id>")
+        return
+    
+    target_id = int(args[1])
+    expire_timestamp = int(time.time()) + (30 * 24 * 3600) # 30 günlük VIP
+    conn = sqlite3.connect("cpm_bot.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (target_id,))
+    if not cursor.fetchone():
+        cursor.execute("INSERT INTO users (user_id, is_vip, vip_expire_time, daily_spins) VALUES (?, 1, ?, 3)", (target_id, expire_timestamp))
+    else:
+        cursor.execute("UPDATE users SET is_vip = 1, vip_expire_time = ?, daily_spins = 3 WHERE user_id = ?", (expire_timestamp, target_id))
+    conn.commit()
+    conn.close()
+    bot.send_message(message.chat.id, f"✅ {target_id} ID'li kullanıcıya 30 günlük VIP üyelik tanımlandı!")
+
+@bot.message_handler(commands=['ekle'])
+def admin_add_balance(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    args = message.text.split()
+    if len(args) != 3:
+        bot.send_message(message.chat.id, "Kullanim: /ekle <user_id> <miktar>")
+        return
+    try:
+        target_id = int(args[1])
+        amount = float(args[2])
+    except Exception:
+        bot.send_message(message.chat.id, "Kullanim: /ekle <user_id> <miktar>")
+        return
+
+    conn = sqlite3.connect("cpm_bot.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (target_id,))
+    if not cursor.fetchone():
+        cursor.execute("INSERT INTO users (user_id, cw_rk_balance) VALUES (?, ?)", (target_id, amount))
+    else:
+        cursor.execute("UPDATE users SET cw_rk_balance = cw_rk_balance + ? WHERE user_id = ?", (amount, target_id))
+    conn.commit()
+    conn.close()
+    bot.send_message(message.chat.id, f"✅ {target_id} ID'li kullanıcıya +{amount} Volt eklendi.")
+
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     chat_id = message.chat.id
@@ -130,32 +178,6 @@ def send_welcome(message):
         conn.commit()
     conn.close()
     bot.send_message(chat_id, "👋 Hoş Geldin! Menüden seçim yapabilirsin:", reply_markup=get_main_keyboard())
-
-@bot.message_handler(commands=['ekle'])
-def admin_add_balance(message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    args = message.text.split()
-    if len(args) != 3:
-        bot.send_message(message.chat.id, "Kullanim: /ekle <user_id> <miktar>")
-        return
-    try:
-        target_id = int(args[1])
-        amount = float(args[2])
-    except Exception:
-        bot.send_message(message.chat.id, "Kullanim: /ekle <user_id> <miktar>")
-        return
-
-    conn = sqlite3.connect("cpm_bot.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (target_id,))
-    if not cursor.fetchone():
-        cursor.execute("INSERT INTO users (user_id, cw_rk_balance) VALUES (?, ?)", (target_id, amount))
-    else:
-        cursor.execute("UPDATE users SET cw_rk_balance = cw_rk_balance + ? WHERE user_id = ?", (amount, target_id))
-    conn.commit()
-    conn.close()
-    bot.send_message(message.chat.id, f"✅ {target_id} ID'li kullanıcıya +{amount} Volt eklendi.")
 
 @bot.message_handler(func=lambda message: True)
 def handle_menu_clicks(message):
@@ -388,3 +410,4 @@ def process_successful_payment(message):
 db_init()
 print("Bot Çalışıyor ve Dinlemede...")
 bot.infinity_polling(none_stop=True)
+        
